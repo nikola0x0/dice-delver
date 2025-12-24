@@ -6,7 +6,7 @@ import pkg from "../../../package.json";
 
 export const HomeView: FC = () => {
   return (
-    <div className="flex min-h-screen flex-col bg-black text-white">
+    <div className="flex min-h-screen flex-col bg-black text-white select-none">
       {/* HEADER - fake Scrolly feed tabs */}
       <header className="flex items-center justify-center border-b border-white/10 py-3">
         <div className="flex items-center gap-2 rounded-full bg-white/5 px-2 py-1 text-[11px]">
@@ -124,6 +124,86 @@ interface Intent {
   value: number;
 }
 
+// === ENEMY TEMPLATES ===
+interface EnemyTemplate {
+  name: string;
+  image: string;
+  baseHp: number;
+  baseDamage: number;
+  actions: (scaledDamage: number) => EnemyAction[];
+  weight: "common" | "uncommon" | "rare" | "boss";
+}
+
+const ENEMY_TEMPLATES: EnemyTemplate[] = [
+  {
+    name: "Skeleton",
+    image: "/skeleton.png",
+    baseHp: 15,
+    baseDamage: 6,
+    actions: (dmg) => [
+      { type: "attack", value: dmg, weight: 70 },
+      { type: "defend", value: 5, weight: 30 },
+    ],
+    weight: "common",
+  },
+  {
+    name: "Slime",
+    image: "/slime.png",
+    baseHp: 20,
+    baseDamage: 4,
+    actions: (dmg) => [
+      { type: "attack", value: dmg, weight: 60 },
+      { type: "heal", value: 6, weight: 40 },
+    ],
+    weight: "common",
+  },
+  {
+    name: "Goblin",
+    image: "/goblin.png",
+    baseHp: 12,
+    baseDamage: 8,
+    actions: (dmg) => [
+      { type: "attack", value: dmg, weight: 80 },
+      { type: "skip", value: 0, weight: 20 },
+    ],
+    weight: "common",
+  },
+  {
+    name: "Bat",
+    image: "/bat.png",
+    baseHp: 8,
+    baseDamage: 5,
+    actions: (dmg) => [
+      { type: "attack", value: dmg, weight: 90 },
+      { type: "skip", value: 0, weight: 10 },
+    ],
+    weight: "uncommon",
+  },
+  {
+    name: "Dark Mage",
+    image: "/dark-mage.png",
+    baseHp: 18,
+    baseDamage: 10,
+    actions: (dmg) => [
+      { type: "attack", value: dmg, weight: 50 },
+      { type: "curse", value: 2, weight: 50 },
+    ],
+    weight: "rare",
+  },
+];
+
+const BOSS_TEMPLATE: EnemyTemplate = {
+  name: "Bone Lord",
+  image: "/bone-lord.png",
+  baseHp: 40,
+  baseDamage: 12,
+  actions: (dmg) => [
+    { type: "attack", value: dmg, weight: 60 },
+    { type: "defend", value: 15, weight: 40 },
+  ],
+  weight: "boss",
+};
+
 // === HELPER FUNCTIONS ===
 const rollDie = (): number => Math.floor(Math.random() * 6) + 1;
 
@@ -159,20 +239,53 @@ const detectHand = (dice: number[]): Hand => {
 };
 
 const spawnEnemy = (floor: number): Enemy => {
-  const baseHp = 15;
-  const scaledHp = Math.floor(baseHp + floor * 1.5);
-  const baseDamage = 6;
-  const scaledDamage = Math.floor(baseDamage + floor * 0.5);
+  // Boss every 10 floors
+  const isBoss = floor % 10 === 0 && floor > 0;
+
+  let template: EnemyTemplate;
+
+  if (isBoss) {
+    template = BOSS_TEMPLATE;
+  } else {
+    // Build spawn pool based on floor
+    const pool: EnemyTemplate[] = [];
+
+    // Common enemies always available
+    const commons = ENEMY_TEMPLATES.filter((e) => e.weight === "common");
+    commons.forEach((e) => {
+      pool.push(e, e, e); // 3x weight for commons
+    });
+
+    // Uncommon enemies after floor 3
+    if (floor >= 3) {
+      const uncommons = ENEMY_TEMPLATES.filter((e) => e.weight === "uncommon");
+      uncommons.forEach((e) => {
+        pool.push(e, e); // 2x weight for uncommons
+      });
+    }
+
+    // Rare enemies after floor 6
+    if (floor >= 6) {
+      const rares = ENEMY_TEMPLATES.filter((e) => e.weight === "rare");
+      rares.forEach((e) => {
+        pool.push(e); // 1x weight for rares
+      });
+    }
+
+    // Pick random enemy from pool
+    template = pool[Math.floor(Math.random() * pool.length)];
+  }
+
+  // Scale stats based on floor
+  const scaledHp = Math.floor(template.baseHp + floor * (isBoss ? 2 : 1.5));
+  const scaledDamage = Math.floor(template.baseDamage + floor * 0.5);
 
   return {
-    name: "Skeleton",
-    image: "/skeleton.png",
+    name: template.name,
+    image: template.image,
     hp: scaledHp,
     maxHp: scaledHp,
-    actions: [
-      { type: "attack", value: scaledDamage, weight: 70 },
-      { type: "defend", value: 5, weight: 30 },
-    ],
+    actions: template.actions(scaledDamage),
   };
 };
 
@@ -217,6 +330,7 @@ const GameSandbox: FC = () => {
   const [lastHand, setLastHand] = useState<string | null>(null);
   const [lastDamage, setLastDamage] = useState<number | null>(null);
   const [feedbackText, setFeedbackText] = useState<string | null>(null);
+  const [lastEnemyAction, setLastEnemyAction] = useState<Intent | null>(null);
 
   // === ACTIONS ===
   const startGame = () => {
@@ -232,6 +346,7 @@ const GameSandbox: FC = () => {
     setLastHand(null);
     setLastDamage(null);
     setFeedbackText(null);
+    setLastEnemyAction(null);
 
     const newEnemy = spawnEnemy(1);
     setEnemy(newEnemy);
@@ -249,6 +364,7 @@ const GameSandbox: FC = () => {
     setLastHand(null);
     setLastDamage(null);
     setFeedbackText(null);
+    setLastEnemyAction(null);
   };
 
   const toggleLock = (index: number) => (e: React.MouseEvent) => {
@@ -301,6 +417,9 @@ const GameSandbox: FC = () => {
 
   const enemyTurn = () => {
     if (!intent) return;
+
+    // Track what enemy did (keep lastHand to show player result too)
+    setLastEnemyAction(intent);
 
     if (intent.action === "attack") {
       // Apply damage (shield absorbs first)
@@ -386,27 +505,48 @@ const GameSandbox: FC = () => {
   // Title Screen
   if (phase === "title") {
     return (
-      <div className="flex h-full w-full flex-col items-center justify-center gap-4 bg-[radial-gradient(circle_at_center,#1a1a2e_0%,#0f0f1a_100%)]">
-        <div className="flex flex-col items-center gap-2">
-          <img
-            src="/dice-6.png"
-            alt="Dice"
-            className="h-20 w-20 [image-rendering:pixelated]"
-          />
-        </div>
-        <h1 className="font-bold text-3xl text-amber-400 [text-shadow:2px_2px_0px_#000,_-1px_-1px_0px_#000]">
-          DICE DELVER
-        </h1>
-        <p className="text-center text-sm text-stone-400">
+      <div
+        className="flex h-full w-full flex-col items-center justify-end pb-16 bg-cover bg-center"
+        style={{
+          backgroundImage: "url(/menu-bg.png)",
+          imageRendering: "pixelated",
+        }}
+      >
+        <p className="text-center text-sm text-amber-200/80 mb-4 [text-shadow:1px_1px_2px_#000]">
           Roll dice. Make combos.
           <br />
           Slay monsters.
         </p>
         <button
           onClick={startGame}
-          className="mt-4 border-b-4 border-amber-700 bg-amber-500 px-8 py-3 font-bold text-black transition-all hover:bg-amber-400 hover:border-amber-600 active:border-b-0 active:border-t-4 active:border-t-amber-700"
+          className="relative flex items-center gap-3 px-10 py-3 font-bold text-amber-100 text-lg tracking-widest transition-all
+            bg-stone-800
+            border-2 border-amber-600/80
+            hover:bg-stone-700 hover:border-amber-500 hover:text-amber-50
+            active:bg-stone-900
+            [text-shadow:0_2px_4px_rgba(0,0,0,0.8)]"
         >
+          <img
+            src="/icon-start.png"
+            alt=""
+            className="h-6 w-6 [image-rendering:pixelated]"
+          />
           START
+        </button>
+        <button
+          disabled
+          className="relative flex items-center gap-3 px-8 py-2 mt-3 font-bold text-stone-400 text-sm tracking-wide transition-all
+            bg-stone-900
+            border-2 border-stone-700
+            opacity-50 cursor-not-allowed
+            [text-shadow:0_2px_4px_rgba(0,0,0,0.8)]"
+        >
+          <img
+            src="/icon-character.png"
+            alt=""
+            className="h-5 w-5 [image-rendering:pixelated] opacity-60"
+          />
+          CHARACTER
         </button>
       </div>
     );
@@ -441,16 +581,13 @@ const GameSandbox: FC = () => {
   }
 
   // Combat Screen
+  const isBossFloor = floor % 10 === 0 && floor > 0;
+
   return (
     <div className="flex h-full w-full flex-col bg-black">
-      {/* Floor Header */}
-      <div className="bg-stone-900/80 py-1 text-center font-bold text-amber-400 [text-shadow:1px_1px_0px_#000]">
-        FLOOR {floor}
-      </div>
-
       {/* Enemy Section */}
       <div
-        className="flex flex-col items-center py-8 relative flex-grow"
+        className="flex items-center justify-center gap-4 px-4 pt-16 pb-4 relative flex-grow"
         style={{
           backgroundImage: "url(/dungeon-wall.png)",
           backgroundSize: "cover",
@@ -458,88 +595,160 @@ const GameSandbox: FC = () => {
           imageRendering: "pixelated",
         }}
       >
-        <div className="border-4 border-stone-700 bg-stone-900/60 p-3">
+        {/* Floor indicator - top of enemy section */}
+        <div
+          className="absolute top-1 left-1/2 -translate-x-1/2 z-0 w-60 h-20 flex items-center justify-center"
+          style={{
+            backgroundImage: "url(/banner-floor.png)",
+            backgroundSize: "100% 100%",
+            backgroundRepeat: "no-repeat",
+            backgroundPosition: "center",
+            imageRendering: "pixelated",
+          }}
+        >
+          <div className="flex items-center gap-1">
+            {isBossFloor && (
+              <img src="/icon-skull.png" alt="" className="h-4 w-4 [image-rendering:pixelated]" />
+            )}
+            <span
+              className={`font-bold text-xs [text-shadow:1px_1px_2px_#000] ${
+                isBossFloor ? "text-red-400" : "text-amber-400"
+              }`}
+            >
+              FLOOR {floor}
+            </span>
+            {isBossFloor && (
+              <img src="/icon-skull.png" alt="" className="h-4 w-4 [image-rendering:pixelated]" />
+            )}
+          </div>
+        </div>
+        {/* Bottom shadow gradient */}
+        <div className="absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-black/80 to-transparent pointer-events-none" />
+        {/* Big Enemy Avatar */}
+        <div className="relative h-32 w-32 shrink-0">
+          <img
+            src="/ui-frame-portrait-enemy.png"
+            alt=""
+            className="absolute inset-0 h-full w-full [image-rendering:pixelated]"
+          />
           <img
             src={enemy?.image}
             alt={enemy?.name}
-            className="h-16 w-16 [image-rendering:pixelated]"
+            className="absolute inset-[12%] h-[76%] w-[76%] [image-rendering:pixelated]"
           />
         </div>
-        <div className="mt-1 text-xs font-bold text-stone-300 [text-shadow:1px_1px_0px_#000]">
-          {enemy?.name}
-        </div>
-        {/* Enemy HP Bar */}
-        <div className="mt-2 flex items-center gap-2">
-          <div className="h-3 w-28 border-2 border-stone-600 bg-stone-800">
-            <div
-              className="h-full bg-rose-600 transition-all"
-              style={{
-                width: `${((enemy?.hp || 0) / (enemy?.maxHp || 1)) * 100}%`,
-              }}
-            />
-          </div>
-          <span className="text-xs font-bold text-stone-300">
-            {enemy?.hp}/{enemy?.maxHp}
-          </span>
-        </div>
-        {/* Enemy Shield */}
-        {enemyShield > 0 && (
-          <div className="mt-1 text-xs font-bold text-sky-400">
-            🛡️ {enemyShield}
-          </div>
-        )}
 
-        {/* Enemy Actions List */}
-        {enemy && (
-          <div className="mt-2 w-full max-w-[220px] border-2 border-stone-600 bg-stone-900/80 p-2">
-            <div className="text-[10px] font-bold text-stone-400 mb-1">
-              ACTIONS:
+        {/* Enemy Stats & Actions */}
+        <div className="flex flex-col gap-2 flex-1 max-w-[160px]">
+          {/* Name */}
+          <div className="text-sm font-bold text-stone-200 [text-shadow:1px_1px_0px_#000]">
+            {enemy?.name}
+          </div>
+
+          {/* HP Bar */}
+          <div className="flex items-center gap-2">
+            <div className="h-5 flex-1 bg-black p-[2px]">
+              <div className="h-full w-full bg-stone-900">
+                <div
+                  className="h-full bg-gradient-to-b from-red-700 to-red-900 transition-all"
+                  style={{
+                    width: `${((enemy?.hp || 0) / (enemy?.maxHp || 1)) * 100}%`,
+                  }}
+                />
+              </div>
             </div>
-            {enemy.actions.map((action, i) => (
-              <div
-                key={i}
-                className="text-xs font-bold text-stone-300 flex justify-between items-center"
-              >
-                <span>
-                  {action.type === "attack" && (
-                    <span className="text-red-400">⚔️ ATK {action.value}</span>
-                  )}
-                  {action.type === "defend" && (
-                    <span className="text-sky-400">🛡️ DEF {action.value}</span>
-                  )}
-                  {action.type === "heal" && (
-                    <span className="text-green-400">
-                      💚 HEAL {action.value}
-                    </span>
-                  )}
-                  {action.type === "curse" && (
-                    <span className="text-purple-400">
-                      💀 CURSE {action.value}
-                    </span>
-                  )}
-                  {action.type === "skip" && (
-                    <span className="text-slate-400">💨 FLEE</span>
-                  )}
-                </span>
-                <span className="text-stone-500 text-[10px]">
-                  ({action.weight}%)
+            <span className="text-[10px] font-bold text-stone-300 w-12">
+              {enemy?.hp}/{enemy?.maxHp}
+            </span>
+            {/* Enemy Shield - inline */}
+            {enemyShield > 0 && (
+              <div className="flex items-center gap-0.5 bg-sky-900/60 px-1 rounded">
+                <img
+                  src="/icon-defend.png"
+                  alt="Shield"
+                  className="h-4 w-4 [image-rendering:pixelated]"
+                />
+                <span className="text-[10px] font-bold text-sky-400">
+                  {enemyShield}
                 </span>
               </div>
-            ))}
+            )}
           </div>
-        )}
-      </div>
 
-      {/* Stone Divider */}
-      <div
-        className="w-full h-8"
-        style={{
-          backgroundImage: "url(/stone-divider.png)",
-          backgroundSize: "cover",
-          backgroundPosition: "center",
-          imageRendering: "pixelated",
-        }}
-      />
+          {/* Action Pool - what enemy MIGHT do */}
+          {enemy && (
+            <div className="flex flex-col gap-1 mt-1">
+              {enemy.actions.map((action, i) => (
+                <div
+                  key={i}
+                  className="flex items-center gap-1.5 px-2 py-1 bg-stone-900/80 rounded whitespace-nowrap"
+                  title={
+                    action.type === "attack"
+                      ? `Deals ${action.value} damage to you`
+                      : action.type === "defend"
+                      ? `Gains ${action.value} shield`
+                      : action.type === "heal"
+                      ? `Restores ${action.value} HP`
+                      : action.type === "curse"
+                      ? `Reduces your max HP by ${action.value}`
+                      : "Skips turn"
+                  }
+                >
+                  <img
+                    src={`/icon-${
+                      action.type === "skip" ? "flee" : action.type
+                    }.png`}
+                    alt={action.type}
+                    className="h-6 w-6 [image-rendering:pixelated] shrink-0"
+                  />
+                  <span
+                    className={`text-[9px] font-bold w-14 shrink-0 ${
+                      action.type === "attack"
+                        ? "text-red-400"
+                        : action.type === "defend"
+                        ? "text-sky-400"
+                        : action.type === "heal"
+                        ? "text-green-400"
+                        : action.type === "curse"
+                        ? "text-purple-400"
+                        : "text-stone-400"
+                    }`}
+                  >
+                    {action.type === "attack"
+                      ? `DMG ${action.value}`
+                      : action.type === "defend"
+                      ? `DEF ${action.value}`
+                      : action.type === "heal"
+                      ? `+${action.value} HP`
+                      : action.type === "curse"
+                      ? `-${action.value} MAX`
+                      : "FLEE"}
+                  </span>
+                  <div className="w-10 h-2 bg-black rounded-sm overflow-hidden shrink-0">
+                    <div
+                      className={`h-full ${
+                        action.type === "attack"
+                          ? "bg-red-600"
+                          : action.type === "defend"
+                          ? "bg-sky-600"
+                          : action.type === "heal"
+                          ? "bg-green-600"
+                          : action.type === "curse"
+                          ? "bg-purple-600"
+                          : "bg-stone-600"
+                      }`}
+                      style={{ width: `${action.weight}%` }}
+                    />
+                  </div>
+                  <span className="text-[8px] text-stone-500">
+                    {action.weight}%
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
 
       {/* Dice Tray Section */}
       <div
@@ -552,9 +761,13 @@ const GameSandbox: FC = () => {
           backgroundColor: "#2c1810",
         }}
       >
-        {/* Feedback Box */}
+        {/* Top shadow gradient */}
+        <div className="absolute inset-x-0 top-0 h-12 bg-gradient-to-b from-black/60 to-transparent pointer-events-none" />
+        {/* Bottom shadow gradient */}
+        <div className="absolute inset-x-0 bottom-0 h-8 bg-gradient-to-t from-black/50 to-transparent pointer-events-none" />
+        {/* Feedback Box - always 2 lines */}
         <div
-          className="mx-auto flex h-14 w-full max-w-[200px] flex-col items-center justify-center relative mb-12"
+          className="mx-auto flex h-14 w-full max-w-[240px] flex-col items-center justify-center relative mb-8 z-10"
           style={{
             backgroundImage: "url(/parchment.png)",
             backgroundSize: "cover",
@@ -562,18 +775,44 @@ const GameSandbox: FC = () => {
             imageRendering: "pixelated",
           }}
         >
-          {lastHand && (
+          {lastHand && lastEnemyAction ? (
             <>
-              <div className="text-sm font-bold text-black">{lastHand}</div>
-              <div className="text-xs font-bold text-stone-900">
-                inflict {lastDamage}
+              <div className="text-[10px] font-bold text-emerald-800">
+                {lastHand} → {lastDamage} DMG
+              </div>
+              <div
+                className={`text-[10px] font-bold flex items-center gap-1 ${
+                  lastEnemyAction.action === "attack"
+                    ? "text-red-800"
+                    : lastEnemyAction.action === "defend"
+                    ? "text-sky-800"
+                    : lastEnemyAction.action === "heal"
+                    ? "text-green-800"
+                    : lastEnemyAction.action === "curse"
+                    ? "text-purple-800"
+                    : "text-stone-700"
+                }`}
+              >
+                <img
+                  src={`/icon-${
+                    lastEnemyAction.action === "skip"
+                      ? "flee"
+                      : lastEnemyAction.action
+                  }.png`}
+                  alt=""
+                  className="h-4 w-4 [image-rendering:pixelated]"
+                />
+                {feedbackText}
               </div>
             </>
-          )}
-          {feedbackText && !lastHand && (
-            <div className="text-sm font-bold text-stone-900">{feedbackText}</div>
-          )}
-          {!lastHand && !feedbackText && (
+          ) : lastHand ? (
+            <>
+              <div className="text-sm font-bold text-black">{lastHand}</div>
+              <div className="text-[10px] font-bold text-emerald-800">
+                {lastDamage} DMG
+              </div>
+            </>
+          ) : (
             <div className="text-xs text-stone-700">Roll the dice!</div>
           )}
         </div>
@@ -584,14 +823,14 @@ const GameSandbox: FC = () => {
               key={`dice-${i}-${value}`}
               onClick={toggleLock(i)}
               type="button"
-              className={`flex h-14 w-14 items-center justify-center border-4 select-none ${
+              className={`flex h-14 w-14 items-center justify-center rounded select-none transition-all ${
                 locked[i]
-                  ? "border-amber-400 bg-amber-900/50 shadow-[0_0_10px_rgba(251,191,36,0.5)]"
-                  : "border-stone-600 bg-stone-800"
+                  ? "bg-amber-900/60 shadow-[0_0_12px_rgba(251,191,36,0.6),inset_0_0_8px_rgba(251,191,36,0.3)]"
+                  : "bg-stone-900/80 shadow-[0_4px_8px_rgba(0,0,0,0.5),inset_0_1px_0_rgba(255,255,255,0.1)]"
               } ${
                 !hasRolled
                   ? "opacity-40 cursor-not-allowed"
-                  : "cursor-pointer hover:border-stone-400 active:bg-stone-700"
+                  : "cursor-pointer hover:bg-stone-800/90 active:shadow-[inset_0_2px_4px_rgba(0,0,0,0.5)]"
               }`}
             >
               <img
@@ -611,7 +850,7 @@ const GameSandbox: FC = () => {
 
       {/* Bottom Section - Player */}
       <div
-        className="bg-stone-900/80 p-2 relative"
+        className="p-3 relative"
         style={{
           backgroundImage: "url(/wood-panel.png)",
           backgroundSize: "cover",
@@ -619,61 +858,97 @@ const GameSandbox: FC = () => {
           imageRendering: "pixelated",
         }}
       >
+        {/* Top shadow gradient */}
+        <div className="absolute inset-x-0 top-0 h-6 bg-gradient-to-b from-black/40 to-transparent pointer-events-none" />
         {/* Player Avatar + Stats Row */}
-        <div className="flex items-center gap-3">
-          {/* Avatar */}
-          <div className="flex h-14 w-14 items-center justify-center border-4 border-stone-600 bg-stone-800">
+        <div className="flex items-center gap-4">
+          {/* Big Avatar */}
+          <div className="relative h-24 w-24 shrink-0">
+            <img
+              src="/ui-frame-portrait.png"
+              alt=""
+              className="absolute inset-0 h-full w-full [image-rendering:pixelated]"
+            />
             <img
               src="/player-knight.png"
               alt="Knight"
-              className="h-11 w-11 [image-rendering:pixelated]"
+              className="absolute inset-[12%] h-[76%] w-[76%] [image-rendering:pixelated]"
             />
           </div>
 
-          {/* HP and Shield Bars */}
-          <div className="flex flex-1 flex-col gap-1">
+          {/* Stats */}
+          <div className="flex flex-1 flex-col gap-2">
+            {/* Class Name */}
+            <div className="text-sm font-bold text-amber-400 [text-shadow:1px_1px_0px_#000]">
+              Knight
+            </div>
             {/* HP Bar */}
             <div className="flex items-center gap-2">
-              <span className="text-xs">❤️</span>
-              <div className="h-4 flex-1 border-2 border-stone-600 bg-stone-800">
-                <div
-                  className="h-full bg-red-600 transition-all"
-                  style={{ width: `${(hp / maxHp) * 100}%` }}
-                />
+              <img
+                src="/icon-health.png"
+                alt="HP"
+                className="h-7 w-7 [image-rendering:pixelated]"
+              />
+              <div className="h-5 flex-1 bg-black p-[2px]">
+                <div className="h-full w-full bg-stone-900">
+                  <div
+                    className="h-full bg-gradient-to-b from-red-700 to-red-900 transition-all"
+                    style={{ width: `${(hp / maxHp) * 100}%` }}
+                  />
+                </div>
               </div>
-              <span className="text-xs font-bold text-stone-300">
+              <span className="text-[10px] font-bold text-stone-300 w-12">
                 {hp}/{maxHp}
               </span>
             </div>
             {/* Shield Bar */}
             <div className="flex items-center gap-2">
-              <span className="text-xs">🛡️</span>
-              <div className="h-4 flex-1 border-2 border-stone-600 bg-stone-800">
-                <div
-                  className="h-full bg-sky-500 transition-all"
-                  style={{ width: `${Math.min(shield / 20, 1) * 100}%` }}
-                />
+              <img
+                src="/icon-defend.png"
+                alt="Shield"
+                className="h-7 w-7 [image-rendering:pixelated]"
+              />
+              <div className="h-5 flex-1 bg-black p-[2px]">
+                <div className="h-full w-full bg-stone-900">
+                  <div
+                    className="h-full bg-gradient-to-b from-sky-600 to-sky-800 transition-all"
+                    style={{ width: `${Math.min(shield / 20, 1) * 100}%` }}
+                  />
+                </div>
               </div>
-              <span className="text-xs font-bold text-stone-300">{shield}</span>
+              <span className="text-[10px] font-bold text-stone-300 w-12">
+                {shield}
+              </span>
             </div>
           </div>
         </div>
 
         {/* Action Buttons */}
-        <div className="mt-2 flex gap-2">
+        <div className="mt-3 flex gap-3">
           <button
             onClick={act}
             disabled={!hasRolled}
-            className="flex-1 border-b-4 border-emerald-800 bg-emerald-600 py-2 font-bold transition-all hover:bg-emerald-500 active:border-b-0 active:border-t-4 active:border-t-emerald-800 disabled:opacity-50 disabled:border-b-4"
+            className="flex-1 h-20 transition-transform disabled:opacity-50 hover:brightness-110 active:scale-95 active:brightness-90"
           >
-            ⚔️ ACT
+            <img
+              src="/btn-act.png"
+              alt="ACT"
+              className="w-full h-full object-contain [image-rendering:pixelated]"
+            />
           </button>
           <button
             onClick={roll}
             disabled={rollsLeft === 0}
-            className="flex-1 border-b-4 border-stone-800 bg-stone-600 py-2 font-bold transition-all hover:bg-stone-500 active:border-b-0 active:border-t-4 active:border-t-stone-800 disabled:opacity-50 disabled:border-b-4"
+            className="flex-1 h-20 relative transition-transform disabled:opacity-50 hover:brightness-110 active:scale-95 active:brightness-90"
           >
-            🎲 ROLL ({rollsLeft})
+            <img
+              src="/btn-roll.png"
+              alt="ROLL"
+              className="w-full h-full object-contain [image-rendering:pixelated]"
+            />
+            <span className="absolute inset-0 flex items-center justify-center font-bold text-stone-200 text-sm [text-shadow:1px_1px_2px_#000]">
+              ROLL ({rollsLeft})
+            </span>
           </button>
         </div>
       </div>
