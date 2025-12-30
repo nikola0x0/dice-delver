@@ -375,11 +375,11 @@ const spawnEnemy = (floor: number): Enemy => {
     template = pool[Math.floor(Math.random() * pool.length)];
   }
 
-  // Scale stats based on floor and type (balanced for fun progression)
-  let hpMultiplier = isBoss ? 1.0 : isElite ? 0.9 : 0.7;
-  let damageMultiplier = isElite ? 0.3 : 0.15;
+  // Scale stats based on floor and type (balanced)
+  let hpMultiplier = isBoss ? 1.2 : isElite ? 1.0 : 0.8;
+  let damageMultiplier = isElite ? 0.4 : 0.25;
   const scaledHp = Math.floor(template.baseHp * (isElite ? 1.3 : 1) + floor * hpMultiplier);
-  const scaledDamage = Math.floor(template.baseDamage * (isElite ? 1.15 : 1) + floor * damageMultiplier);
+  const scaledDamage = Math.floor(template.baseDamage * (isElite ? 1.2 : 1) + floor * damageMultiplier);
 
   // Build actions - elites get extra actions
   let actions = template.actions(scaledDamage);
@@ -785,8 +785,8 @@ const GameSandbox: FC = () => {
     const wasBoss = floor % 10 === 0 && floor > 0;
     setFloor(newFloor);
 
-    // Player progression rewards (generous healing)
-    const healAmount = wasBoss ? 25 : 10;
+    // Player progression rewards (balanced)
+    const healAmount = wasBoss ? 15 : 5;
     const newHp = Math.min(hp + healAmount, maxHp);
     setHp(newHp);
     setFeedbackText(`VICTORY! +${healAmount} HP`);
@@ -794,8 +794,10 @@ const GameSandbox: FC = () => {
     // Clear debuffs on floor clear
     setPoisonStacks(0);
 
-    // Gain damage bonus every floor
-    setDamageBonus((d) => d + 1);
+    // Gain damage bonus every 3 floors
+    if (newFloor % 3 === 0) {
+      setDamageBonus((d) => d + 1);
+    }
 
     const newEnemy = spawnEnemy(newFloor);
     setEnemy(newEnemy);
