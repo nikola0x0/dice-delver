@@ -53,10 +53,10 @@ export const HomeView: FC = () => {
 
 // === CONSTANTS ===
 const CHARACTER_HP: Record<string, number> = {
-  knight: 60,
-  mage: 35,
-  archer: 45,
-  rogue: 40,
+  knight: 70,
+  mage: 55,
+  archer: 55,
+  rogue: 50,
 };
 const CHARACTER_ROLLS: Record<string, number> = {
   knight: 2,
@@ -375,11 +375,11 @@ const spawnEnemy = (floor: number): Enemy => {
     template = pool[Math.floor(Math.random() * pool.length)];
   }
 
-  // Scale stats based on floor and type
-  let hpMultiplier = isBoss ? 2 : isElite ? 1.8 : 1.5;
-  let damageMultiplier = isElite ? 0.7 : 0.5;
-  const scaledHp = Math.floor(template.baseHp * (isElite ? 1.5 : 1) + floor * hpMultiplier);
-  const scaledDamage = Math.floor(template.baseDamage * (isElite ? 1.25 : 1) + floor * damageMultiplier);
+  // Scale stats based on floor and type (balanced for fun progression)
+  let hpMultiplier = isBoss ? 1.0 : isElite ? 0.9 : 0.7;
+  let damageMultiplier = isElite ? 0.3 : 0.15;
+  const scaledHp = Math.floor(template.baseHp * (isElite ? 1.3 : 1) + floor * hpMultiplier);
+  const scaledDamage = Math.floor(template.baseDamage * (isElite ? 1.15 : 1) + floor * damageMultiplier);
 
   // Build actions - elites get extra actions
   let actions = template.actions(scaledDamage);
@@ -450,6 +450,8 @@ const GameSandbox: FC = () => {
   // Enemy state
   const [enemy, setEnemy] = useState<Enemy | null>(null);
   const [enemyShield, setEnemyShield] = useState(0);
+  const [enemyPoison, setEnemyPoison] = useState(0);
+  const [enemyWeaken, setEnemyWeaken] = useState(0);
   const [intent, setIntent] = useState<Intent | null>(null);
 
   // Feedback state
@@ -494,6 +496,8 @@ const GameSandbox: FC = () => {
     const newEnemy = spawnEnemy(1);
     setEnemy(newEnemy);
     setEnemyShield(0);
+    setEnemyPoison(0);
+    setEnemyWeaken(0);
     setIntent(rollIntent(newEnemy));
   };
 
@@ -568,71 +572,90 @@ const GameSandbox: FC = () => {
         newShield = shield + SHIELD_GAINS[hand.type];
       }
     } else if (character === "mage") {
-      // Mage's Arcane Stacks mechanic
+      // Mage's Arcane Stacks mechanic - burst damage (nerfed)
       if (hand.type === "pair") {
-        // Pair: +1 Arcane Stack, no damage bonus
+        // Pair: +1 Arcane Stack, reduced damage
         newStacks = Math.min(arcaneStacks + 1, 5);
         handName = `+1 ARCANE`;
-        damage = Math.floor(damage * 0.5); // Reduced damage when building
+        damage = Math.floor(damage * 0.6);
       } else if (hand.type === "two-pair") {
-        // Two Pair: +2 Arcane Stacks
+        // Two Pair: +2 Arcane Stacks, reduced damage
         newStacks = Math.min(arcaneStacks + 2, 5);
         handName = `+2 ARCANE`;
-        damage = Math.floor(damage * 0.5); // Reduced damage when building
+        damage = Math.floor(damage * 0.6);
       } else if (hand.rank >= 3 && arcaneStacks > 0) {
-        // Trips+: Consume stacks for +25% damage per stack
-        const bonusMult = 1 + arcaneStacks * 0.25;
+        // Trips+: Consume stacks for +35% damage per stack + small heal
+        const bonusMult = 1 + arcaneStacks * 0.35;
         const bonusDamage = Math.floor(damage * bonusMult) - damage;
         damage = Math.floor(damage * bonusMult);
-        handName = `UNLEASH! (+${bonusDamage})`;
+        const healAmount = arcaneStacks * 2; // Reduced heal
+        newHp = Math.min(newHp + healAmount, maxHp);
+        handName = `UNLEASH! (+${bonusDamage}) +${healAmount} HP`;
         newStacks = 0;
       }
       // Mage has no shield mechanic
     } else if (character === "archer") {
-      // Archer's Mark Prey mechanic
+      // Archer's Mark Prey mechanic + Poison arrows + Life steal
       if (hand.type === "pair") {
-        // Pair: +1 Mark, deal normal damage
+        // Pair: +1 Mark + 3 poison + heal
         newMarks = Math.min(markStacks + 1, 5);
-        handName = `+1 MARK`;
+        setEnemyPoison((p) => p + 3);
+        const healAmount = 4;
+        newHp = Math.min(newHp + healAmount, maxHp);
+        handName = `+1 MARK +3 PSN +${healAmount} HP`;
       } else if (hand.type === "two-pair") {
-        // Two Pair: +2 Marks, deal normal damage
+        // Two Pair: +2 Marks + 4 poison + heal
         newMarks = Math.min(markStacks + 2, 5);
-        handName = `+2 MARK`;
+        setEnemyPoison((p) => p + 4);
+        const healAmount = 6;
+        newHp = Math.min(newHp + healAmount, maxHp);
+        handName = `+2 MARK +4 PSN +${healAmount} HP`;
       } else if (hand.rank >= 3 && markStacks > 0) {
         // Trips+: Deal damage with Mark bonus, consume marks
-        const bonusMult = 1 + markStacks * 0.1;
-        const bonusDamage = Math.floor(damage * bonusMult) - damage;
-        damage = Math.floor(damage * bonusMult);
-        handName = `EXECUTE! (+${bonusDamage})`;
+        // Execute threshold: instant kill if enemy below 45% HP
+        const executeThreshold = enemy.maxHp * 0.45;
+        if (enemy.hp <= executeThreshold) {
+          damage = enemy.hp + enemyShield + 999; // Overkill to ensure death
+          handName = `EXECUTE! (LETHAL)`;
+        } else {
+          const bonusMult = 1 + markStacks * 0.4;
+          const bonusDamage = Math.floor(damage * bonusMult) - damage;
+          damage = Math.floor(damage * bonusMult);
+          handName = `EXECUTE! (+${bonusDamage})`;
+        }
         newMarks = 0;
       }
       // Archer has no shield mechanic
     } else if (character === "rogue") {
-      // Rogue's High Roller mechanic - only trips+, quad heals, straight insane
+      // Rogue's High Roller mechanic - high risk, high reward
       if (hand.type === "pair" || hand.type === "sum") {
-        // Weak hands: No damage!
-        damage = 0;
-        handName = "MISS!";
+        // Weak hands: Chip damage + small heal
+        damage = Math.floor(sum * 0.75);
+        const healAmount = 3;
+        newHp = Math.min(newHp + healAmount, maxHp);
+        handName = `GRAZE +${healAmount} HP`;
       } else if (hand.type === "two-pair") {
-        // Two Pair: 1x damage (okay)
-        damage = Math.floor(sum * 1);
+        // Two Pair: 2x damage
+        damage = Math.floor(sum * 2);
         handName = "TWO PAIR";
       } else if (hand.type === "three-kind") {
-        // Trips: Deal solid damage + small heal
-        damage = Math.floor(sum * 2.5);
-        const healAmount = 5;
+        // Trips: Deal solid damage + big heal + weaken enemy
+        damage = Math.floor(sum * 3);
+        const healAmount = 12;
         newHp = Math.min(newHp + healAmount, maxHp);
-        handName = `TRIPS! +${healAmount} HP`;
+        setEnemyWeaken((w) => w + 2);
+        handName = `TRIPS! +${healAmount} HP +2 WKN`;
       } else if (hand.type === "quad") {
-        // Quad: Heal instead of damage!
-        const healAmount = 20;
+        // Quad: Massive heal + some damage!
+        const healAmount = 30;
         newHp = Math.min(hp + healAmount, maxHp);
-        damage = 0;
+        damage = Math.floor(sum * 2);
         handName = `JACKPOT! +${healAmount} HP`;
       } else if (hand.type === "straight") {
-        // Straight: INSANE damage
-        damage = Math.floor(sum * 5);
-        handName = "STRAIGHT!";
+        // Straight: INSANE damage + poison
+        damage = Math.floor(sum * 6);
+        setEnemyPoison((p) => p + 5);
+        handName = "STRAIGHT! +5 PSN";
       }
     }
 
@@ -669,14 +692,31 @@ const GameSandbox: FC = () => {
   };
 
   const enemyTurn = (currentHp: number, currentShield: number) => {
-    if (!intent) return;
+    if (!intent || !enemy) return;
+
+    // Process enemy poison first (DoT at start of their turn)
+    if (enemyPoison > 0) {
+      const poisonDmg = enemyPoison;
+      const newEnemyHp = enemy.hp - poisonDmg;
+      setEnemy({ ...enemy, hp: newEnemyHp });
+      setEnemyPoison((p) => Math.max(0, p - 1)); // Reduce by 1 each turn
+
+      if (newEnemyHp <= 0) {
+        // Enemy dies from poison
+        nextFloor();
+        return;
+      }
+    }
 
     // Track what enemy did (keep lastHand to show player result too)
     setLastEnemyAction(intent);
 
     if (intent.action === "attack") {
-      // Apply damage (shield absorbs first)
-      let damage = intent.value;
+      // Apply weaken debuff (50% damage reduction)
+      let damage = enemyWeaken > 0 ? Math.floor(intent.value * 0.5) : intent.value;
+      if (enemyWeaken > 0) {
+        setEnemyWeaken((w) => w - 1); // Reduce weaken by 1
+      }
       let remainingShield = currentShield;
       if (remainingShield > 0) {
         if (remainingShield >= damage) {
@@ -745,8 +785,8 @@ const GameSandbox: FC = () => {
     const wasBoss = floor % 10 === 0 && floor > 0;
     setFloor(newFloor);
 
-    // Player progression rewards
-    const healAmount = wasBoss ? 15 : 5;
+    // Player progression rewards (generous healing)
+    const healAmount = wasBoss ? 25 : 10;
     const newHp = Math.min(hp + healAmount, maxHp);
     setHp(newHp);
     setFeedbackText(`VICTORY! +${healAmount} HP`);
@@ -754,14 +794,14 @@ const GameSandbox: FC = () => {
     // Clear debuffs on floor clear
     setPoisonStacks(0);
 
-    // Gain damage bonus every 3 floors
-    if (newFloor % 3 === 0) {
-      setDamageBonus((d) => d + 1);
-    }
+    // Gain damage bonus every floor
+    setDamageBonus((d) => d + 1);
 
     const newEnemy = spawnEnemy(newFloor);
     setEnemy(newEnemy);
     setEnemyShield(0);
+    setEnemyPoison(0);
+    setEnemyWeaken(0);
     setIntent(rollIntent(newEnemy));
 
     setDice([1, 1, 1, 1]);
@@ -1317,6 +1357,32 @@ const GameSandbox: FC = () => {
                 </span>
               </div>
             )}
+            {/* Enemy Poison - debuff */}
+            {enemyPoison > 0 && (
+              <div className="flex items-center gap-0.5 bg-green-900/60 px-1 rounded">
+                <img
+                  src="/icon-poison.png"
+                  alt="Poison"
+                  className="h-4 w-4 [image-rendering:pixelated]"
+                />
+                <span className="text-[10px] font-bold text-green-400">
+                  {enemyPoison}
+                </span>
+              </div>
+            )}
+            {/* Enemy Weaken - debuff */}
+            {enemyWeaken > 0 && (
+              <div className="flex items-center gap-0.5 bg-purple-900/60 px-1 rounded">
+                <img
+                  src="/icon-weaken.png"
+                  alt="Weaken"
+                  className="h-4 w-4 [image-rendering:pixelated]"
+                />
+                <span className="text-[10px] font-bold text-purple-400">
+                  {enemyWeaken}
+                </span>
+              </div>
+            )}
           </div>
 
           {/* Action Pool - always 3 rows for consistent layout */}
@@ -1518,15 +1584,16 @@ const GameSandbox: FC = () => {
           const stackGain = isStacking ? (hand.type === "pair" ? 1 : 2) : 0;
           const isUnleash = character === "mage" && hand && hand.rank >= 3 && arcaneStacks > 0;
           const unleashBonus = isUnleash
-            ? Math.floor(dice.reduce((a, b) => a + b, 0) * DAMAGE_MULTIPLIERS[hand.type] * arcaneStacks * 0.25)
+            ? Math.floor(dice.reduce((a, b) => a + b, 0) * DAMAGE_MULTIPLIERS[hand.type] * arcaneStacks * 0.35)
             : 0;
 
           // Archer mechanics
           const isMarking = character === "archer" && hand && (hand.type === "pair" || hand.type === "two-pair");
           const markGain = isMarking ? (hand.type === "pair" ? 1 : 2) : 0;
           const isExecute = character === "archer" && hand && hand.rank >= 3 && markStacks > 0;
-          const executeBonus = isExecute
-            ? Math.floor(dice.reduce((a, b) => a + b, 0) * DAMAGE_MULTIPLIERS[hand.type] * markStacks * 0.1)
+          const isLethalExecute = isExecute && enemy && enemy.hp <= enemy.maxHp * 0.45;
+          const executeBonus = isExecute && !isLethalExecute
+            ? Math.floor(dice.reduce((a, b) => a + b, 0) * DAMAGE_MULTIPLIERS[hand.type] * markStacks * 0.4)
             : 0;
 
           // Rogue mechanics
@@ -1586,12 +1653,17 @@ const GameSandbox: FC = () => {
                 ) : isUnleash ? (
                   <>
                     UNLEASH!
-                    <span className="text-[10px] ml-1 opacity-70">(+{unleashBonus} DMG)</span>
+                    <span className="text-[10px] ml-1 opacity-70">(+{unleashBonus} DMG +{arcaneStacks * 2} HP)</span>
                   </>
                 ) : isMarking ? (
                   <>
-                    +{markGain} MARK
-                    <span className="text-[10px] ml-1 opacity-70">(+{markGain * 10}% DMG)</span>
+                    +{markGain} MARK +{markGain === 1 ? 3 : 4} PSN +{markGain === 1 ? 4 : 6} HP
+                    <span className="text-[10px] ml-1 opacity-70">(+{markGain * 40}%)</span>
+                  </>
+                ) : isLethalExecute ? (
+                  <>
+                    EXECUTE!
+                    <span className="text-[10px] ml-1 opacity-70 text-red-400">(LETHAL)</span>
                   </>
                 ) : isExecute ? (
                   <>
@@ -1600,28 +1672,28 @@ const GameSandbox: FC = () => {
                   </>
                 ) : isMiss ? (
                   <>
-                    MISS!
-                    <span className="text-[10px] ml-1 opacity-70">(0 DMG)</span>
+                    GRAZE
+                    <span className="text-[10px] ml-1 opacity-70">(0.75x +3 HP)</span>
                   </>
                 ) : isTwoPairRogue ? (
                   <>
                     TWO PAIR
-                    <span className="text-[10px] ml-1 opacity-70">(1x DMG)</span>
+                    <span className="text-[10px] ml-1 opacity-70">(2x DMG)</span>
                   </>
                 ) : isJackpot ? (
                   <>
                     JACKPOT!
-                    <span className="text-[10px] ml-1 opacity-70">(+20 HP)</span>
+                    <span className="text-[10px] ml-1 opacity-70">(2x +30 HP)</span>
                   </>
                 ) : isStraightHit ? (
                   <>
                     STRAIGHT!
-                    <span className="text-[10px] ml-1 opacity-70">(5x DMG!)</span>
+                    <span className="text-[10px] ml-1 opacity-70">(6x +5 PSN!)</span>
                   </>
                 ) : isTripsHit ? (
                   <>
                     TRIPS!
-                    <span className="text-[10px] ml-1 opacity-70">(2.5x +5 HP)</span>
+                    <span className="text-[10px] ml-1 opacity-70">(3x +12 HP +2 WKN)</span>
                   </>
                 ) : character === "knight" ? (
                   <>
